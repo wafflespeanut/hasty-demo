@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 )
@@ -45,14 +46,16 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 		path: storePathPrefix,
 	}
 
-	cmdChan := make(chan repoCommand)
+	linkChan := make(chan linkMessage)
+	ackChan := make(chan struct{})
 
 	return &ImageRepository{
 		linkCache,
 		metaCache,
 		dataStore,
 		objectStore,
-		cmdChan,
+		linkChan,
+		ackChan,
 	}, nil
 }
 
@@ -64,21 +67,45 @@ type ImageRepository struct {
 	metaCache   *lru.Cache
 	dataStore   DataStore
 	objectStore ObjectStore
-	cmdChan     chan repoCommand
+	linkChan    chan linkMessage
+	ackChan     chan struct{}
 }
 
 type repoCmdType int
 
+// Internally used commands for querying/updating the repository.
 const (
-	cmdCreateLink = iota
-	cmdIsValidLink
+	cmdCreateUploadID = iota
 	cmdAddImage
 )
 
-type repoCommand struct {
-	ty repoCmdType
+// Message used for exchanging upload link information.
+type linkMessage struct {
+	ty         repoCmdType
+	id         string
+	linkExpiry time.Time
 }
 
-func (r *ImageRepository) handleCommands() {
+// createUploadID binds the given ID to the given expiry time.
+func (r *ImageRepository) createUploadID(linkID string, expiry time.Time) {
+	r.linkChan <- linkMessage{
+		ty:         cmdCreateUploadID,
+		id:         linkID,
+		linkExpiry: expiry,
+	}
+	_ = <-r.ackChan
+}
 
+// handleCommands for this repository. NOTE: This is blocking and hence,
+// it must be spawn into a separate goroutine.
+func (r *ImageRepository) handleCommands() {
+	for {
+		select {
+		case cmd := <-r.linkChan:
+			if cmd.ty == cmdCreateUploadID {
+				r.linkCache.Add(cmd.id, cmd.linkExpiry)
+				r.ackChan <- struct{}{}
+			}
+		}
+	}
 }

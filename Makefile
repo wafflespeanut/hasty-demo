@@ -1,5 +1,6 @@
 IMAGE = hasty_service
 PORT = 3000
+ACCESS_TOKEN = foobar
 
 all: build test
 
@@ -13,7 +14,7 @@ image:
 
 run: image
 	-docker rm -f hasty
-	docker run -it -p $(PORT):$(PORT) --name hasty -e PORT=$(PORT) $(IMAGE)
+	docker run -it -e ACCESS_TOKEN=$(ACCESS_TOKEN) -p $(PORT):$(PORT) --name hasty $(IMAGE) -p $(PORT)
 
 test:
 	cd service && go test

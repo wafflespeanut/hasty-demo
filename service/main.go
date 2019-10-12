@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/gorilla/mux"
 )
 
 const (
@@ -20,6 +18,10 @@ const (
 	defaultLinkCacheCapacity = 1000
 	defaultMetaCacheCapacity = 250
 	defaultStorePath         = "./store"
+	defaultUploadLinkPrefix  = "/uploads"
+	minExpirySeconds         = 30
+
+	headerAccessToken = "X-Access-Token"
 )
 
 func main() {
@@ -30,14 +32,12 @@ func main() {
 	linksCacheCapPtr := flag.Uint("cache-links", defaultLinkCacheCapacity, "Cache capacity for upload links")
 	metaCacheCapPtr := flag.Uint("cache-meta", defaultLinkCacheCapacity, "Cache capacity for image metadata")
 
-	portStr := os.Getenv(envAccessToken)
-	if portStr == "" {
+	token := os.Getenv(envAccessToken)
+	if token == "" {
 		fmt.Printf("Please set %s in the environment for securing endpoints.\n", envAccessToken)
 		os.Exit(1)
 	}
 
-	// We need a router to extract IDs for expiring links and image fetching.
-	router := mux.NewRouter()
 	repository, err := initializeRepository(int(*linksCacheCapPtr), int(*metaCacheCapPtr))
 	if err != nil {
 		fmt.Printf("Error initializing repository: %s", err.Error())
@@ -47,9 +47,11 @@ func main() {
 	go repository.handleCommands()
 
 	service := &ImageService{
-		cmdChan: repository.cmdChan,
+		accessToken:      token,
+		repository:       repository,
+		uploadLinkPrefix: defaultUploadLinkPrefix,
 	}
-	service.registerRoutes(router)
+	service.registerRoutes()
 
 	log.Printf("Listening on port %d\n", *portPtr)
 	http.ListenAndServe(fmt.Sprintf(":%d", *portPtr), nil)

@@ -11,7 +11,7 @@ A hobby project for designing a simple scalable image service. Backend technolog
 
 The API itself has four endpoints:
 
- - `POST /link`:
- - `POST /uploads/{temp-id}`:
- - `GET /images/{id}`:
- - `GET /stats`:
+ - `POST /admin/ephemeral-links`:
+ - `GET  /admin/stats`:
+ - `POST /{ephemeral-link}`:
+ - `GET  /images/{id}`:

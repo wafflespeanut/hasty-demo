@@ -2,4 +2,4 @@ FROM scratch
 
 COPY service/hasty_service /
 
-CMD ["/hasty_service"]
+ENTRYPOINT ["/hasty_service"]
