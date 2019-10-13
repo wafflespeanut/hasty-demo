@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -10,8 +11,9 @@ import (
 
 // DataStore is the persistence layer for adding, mutating and querying data.
 type DataStore interface {
-	addUploadID(id string, expiry time.Time)
-	getUploadExpiry(id string)
+	initialize() error
+	addUploadID(id string, expiry time.Time) error
+	getUploadExpiry(id string) (*time.Time, error)
 }
 
 // ObjectStore is the persistence layer for storing and retrieving objects.
@@ -25,8 +27,11 @@ type ObjectStore interface {
 // NoOpStore which does nothing.
 type NoOpStore struct{}
 
-func (NoOpStore) addUploadID(id string, expiry time.Time) {}
-func (NoOpStore) getUploadExpiry(id string)               {}
+func (NoOpStore) initialize() error                             { return nil }
+func (NoOpStore) addUploadID(id string, expiry time.Time) error { return nil }
+func (NoOpStore) getUploadExpiry(id string) (*time.Time, error) {
+	return nil, errors.New("no-op")
+}
 
 // MARK: File store.
 

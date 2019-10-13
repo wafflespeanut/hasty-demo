@@ -10,6 +10,12 @@ type LinkCreationRequest struct {
 	Timestamp string `json:"timeExact"`
 }
 
+// UploadLink model for ephemeral upload links.
+type UploadLink struct {
+	ID     string
+	Expiry time.Time
+}
+
 // EphemeralLinkResponse for generated ephemeral links.
 type EphemeralLinkResponse struct {
 	// RelativePath to the newly generated ephemeral link.

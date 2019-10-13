@@ -13,6 +13,7 @@ import (
 const (
 	envAccessToken = "ACCESS_TOKEN"
 	envStorePath   = "STORE_PATH"
+	envPostgresURL = "POSTGRES_URL"
 
 	defaultBufSize           = 512
 	defaultPort              = 3000
@@ -21,6 +22,8 @@ const (
 	defaultStorePath         = "./store"
 	defaultUploadLinkPrefix  = "/uploads"
 	minExpirySeconds         = 30
+	uploadLinkIDLength       = 48
+	imageIDLength            = 48
 
 	headerAccessToken = "X-Access-Token"
 	headerContentType = "Content-Type"

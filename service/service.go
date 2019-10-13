@@ -63,7 +63,7 @@ func (service *ImageService) CreateUploadLink(req LinkCreationRequest) (*Ephemer
 		return nil, errInvalidExpiryTime
 	}
 
-	linkID := randomAlphanumeric(48)
+	linkID := randomAlphanumeric(uploadLinkIDLength)
 	service.repository.createUploadID(linkID, expiry)
 
 	return &EphemeralLinkResponse{
@@ -111,7 +111,7 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		}
 
 		hasher := sha256.New()
-		imageID := randomAlphanumeric(48)
+		imageID := randomAlphanumeric(imageIDLength)
 		fileName := part.FileName()
 
 		var totalBytes int

@@ -38,10 +38,25 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 		return nil, err
 	}
 
-	log.Println("Initializing no-op store for metadata.")
-	dataStore := NoOpStore{}
+	var dataStore DataStore
 
-	log.Println("Initializing file store for image.")
+	postgresURL := os.Getenv(envPostgresURL)
+	if postgresURL != "" {
+		log.Println("Initializing PostgreSQL database driver.")
+		dataStore = &PostgreSQLStore{
+			url: postgresURL,
+		}
+	} else {
+		log.Println("Initializing no-op store for metadata.")
+		dataStore = NoOpStore{}
+	}
+
+	err = dataStore.initialize()
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("Initializing file store for images.")
 	storePathPrefix := os.Getenv(envStorePath)
 	if storePathPrefix == "" {
 		storePathPrefix = defaultStorePath
@@ -190,16 +205,22 @@ func (r *ImageRepository) handleCommands() {
 	for {
 		cmd := <-r.cmdHub.cmdChan
 		if cmd.ty == cmdCreateUploadID {
-			r.linkCache.Add(cmd.id, cmd.data)
-			// FIXME: Persist in store.
+			expiry := cmd.data.(time.Time)
+			r.linkCache.Add(cmd.id, expiry)
+			go r.dataStore.addUploadID(cmd.id, expiry)
 			r.cmdHub.ackChan <- struct{}{}
 		} else if cmd.ty == cmdFetchExpiry {
 			value, exists := r.linkCache.Get(cmd.id)
 			if exists {
 				r.cmdHub.respChan <- value
 			} else {
-				// FIXME: Check store.
-				r.cmdHub.respChan <- defaultExpiry
+				expiry, _ := r.dataStore.getUploadExpiry(cmd.id)
+				if expiry != nil {
+					r.linkCache.Add(cmd.id, *expiry)
+					r.cmdHub.respChan <- *expiry
+				} else {
+					r.cmdHub.respChan <- defaultExpiry
+				}
 			}
 		} else if cmd.ty == cmdAddMeta {
 			meta := cmd.data.(ImageMeta)

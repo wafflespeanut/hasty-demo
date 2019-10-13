@@ -13,8 +13,14 @@ image:
 	docker build -t $(IMAGE) .
 
 run: image
+	-docker network create roachnet
+	-docker rm -f roach1
+	docker run -d --name roach1 --hostname=roach1 --network roachnet \
+		-p 26257:26257 cockroachdb/cockroach start --insecure
 	-docker rm -f hasty
-	docker run -it -e ACCESS_TOKEN=$(ACCESS_TOKEN) -p $(PORT):$(PORT) --name hasty $(IMAGE) -p $(PORT)
+	docker run -it --network roachnet -e ACCESS_TOKEN=$(ACCESS_TOKEN) \
+		-e POSTGRES_URL=postgresql://root@roach1:26257?sslmode=disable \
+		-p $(PORT):$(PORT) --name hasty $(IMAGE) -p $(PORT)
 
 test:
 	cd service && go test
