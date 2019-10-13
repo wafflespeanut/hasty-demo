@@ -103,7 +103,10 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		ctype := part.Header.Get(headerContentType)
 		if ctype == "" || !strings.HasPrefix(ctype, "image/") {
 			// Ignore this part if this is not an image. We can bail out
-			// with an error in the future, if needed.
+			// with an error in the future, if needed. Or, we could also
+			// stream the file and discard it whilst processing. Even then,
+			// we can't take it for granted - we have to check the magic
+			// numbers when we process the image.
 			continue
 		}
 

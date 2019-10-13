@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/h2non/filetype"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/rwcarlsen/goexif/exif"
 )
@@ -299,34 +300,52 @@ func (r *ImageRepository) processImages() {
 			meta := data.(ImageMeta)
 			meta.applyDefaults()
 
-			reader, err := r.objectStore.getImageReader(meta.ID)
-			if err != nil {
-				log.Printf("Cannot obtain reader for image (ID: %s): %s\n", meta.ID, err.Error())
-				r.updateImageData(meta)
-				continue
-			}
-
-			x, err := exif.Decode(reader)
-			if err != nil {
-				log.Printf("Cannot decode exif data from image (ID: %s): %s\n", meta.ID, err.Error())
-				r.updateImageData(meta)
-				continue
-			}
-
-			// NOTE: Right now, we're only worried about the camera model,
-			// but we can always get more.
-
-			value, err := x.Get(exif.Model)
-			if err == nil {
-				meta.CameraModel = value.String()
-			}
-
-			err = r.objectStore.cleanupImageReader(meta.ID, reader)
-			if err != nil {
-				log.Printf("Error cleaning up reader (id: %s): %s\n", meta.ID, err.Error())
-			}
+			r.updateMetaFromExif(&meta)
+			r.updateFormat(&meta)
 
 			r.updateImageData(meta)
 		}
 	}
+}
+
+func (r *ImageRepository) updateMetaFromExif(meta *ImageMeta) {
+	reader, err := r.objectStore.getImageReader(meta.ID)
+	if err != nil {
+		log.Printf("Cannot obtain reader for getting image metadata (ID: %s): %s\n",
+			meta.ID, err.Error())
+		return
+	}
+
+	x, err := exif.Decode(reader)
+	if err != nil {
+		log.Printf("Cannot decode exif data from image (ID: %s): %s\n",
+			meta.ID, err.Error())
+		return
+	}
+
+	// NOTE: Right now, we're only worried about the camera model,
+	// but we can always get more.
+
+	value, err := x.Get(exif.Model)
+	if err == nil {
+		meta.CameraModel = value.String()
+	}
+
+	err = r.objectStore.cleanupImageReader(meta.ID, reader)
+	if err != nil {
+		log.Printf("Error cleaning up reader (id: %s): %s\n", meta.ID, err.Error())
+	}
+}
+
+func (r *ImageRepository) updateFormat(meta *ImageMeta) {
+	reader, err := r.objectStore.getImageReader(meta.ID)
+	if err != nil {
+		log.Printf("Cannot obtain reader for checking image (ID: %s): %s\n",
+			meta.ID, err.Error())
+		return
+	}
+
+	kind, _ := filetype.MatchReader(reader)
+	meta.MediaType = kind.MIME.Value
+	// FIXME: If this isn't an image, then we should discard that in store.
 }
