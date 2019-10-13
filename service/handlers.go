@@ -16,20 +16,16 @@ func (service *ImageService) registerRoutes() {
 	}
 
 	ephemeralEndpoint := fmt.Sprintf("%s/{id}", service.uploadLinkPrefix)
-	r.HandleFunc(ephemeralEndpoint, func(w http.ResponseWriter, r *http.Request) {
-		//
-	}).Methods("POST")
-
+	r.HandleFunc(ephemeralEndpoint, service.handleImageUpload).Methods("POST")
 	r.HandleFunc("/images/{id}", func(w http.ResponseWriter, r *http.Request) {
 		//
 	}).Methods("GET")
 
-	// Endpoints that require the access token are behind the auth middleware.
+	// Endpoints that require an access token are behind the auth middleware.
 	s := r.PathPrefix("/admin").Subrouter()
 	s.Use(amw.Middleware)
 
 	s.HandleFunc("/ephemeral-links", service.handleLinkCreation).Methods("POST")
-
 	s.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		//
 	}).Methods("GET")
@@ -47,6 +43,23 @@ func (service *ImageService) handleLinkCreation(w http.ResponseWriter, r *http.R
 	resp, err := service.CreateUploadLink(req)
 	if err != nil {
 		respondError(w, err.Error(), http.StatusBadRequest)
+	} else {
+		respondJSON(w, resp)
+	}
+}
+
+func (service *ImageService) handleImageUpload(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	uploadID := vars["id"]
+	reader, err := r.MultipartReader()
+	if err != nil {
+		respondError(w, "Expected upload stream to have multipart data", http.StatusBadRequest)
+		return
+	}
+
+	resp, code := service.StreamImagesToBackend(uploadID, reader)
+	if code == streamInvalidUploadID {
+		http.Error(w, "Not Found", http.StatusNotFound)
 	} else {
 		respondJSON(w, resp)
 	}

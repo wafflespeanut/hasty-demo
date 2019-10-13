@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -68,11 +69,20 @@ func createService() *ImageService {
 		linkCache: lCache,
 		metaCache: mCache,
 		dataStore: NoOpStore{},
-		objectStore: FileStore{
-			path: "./",
+		objectStore: &FileStore{
+			pathPrefix: "./",
+			openFds:    make(map[string]*os.File),
 		},
-		linkChan: make(chan linkMessage),
-		ackChan:  make(chan struct{}),
+		cmdHub: CommandHub{
+			cmdChan:  make(chan repoMessage),
+			respChan: make(chan interface{}),
+			ackChan:  make(chan struct{}),
+		},
+		dataHub: ObjectHub{
+			cmdChan:  make(chan repoMessage),
+			respChan: make(chan interface{}),
+			ackChan:  make(chan struct{}),
+		},
 	}
 
 	// It's fine if all those goroutines keep blocking - they're efficient,

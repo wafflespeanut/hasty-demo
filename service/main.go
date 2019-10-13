@@ -45,6 +45,7 @@ func main() {
 	}
 
 	go repository.handleCommands()
+	go repository.processChunks()
 
 	service := &ImageService{
 		accessToken:      token,

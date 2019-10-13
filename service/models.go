@@ -20,3 +20,14 @@ type EphemeralLinkResponse struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+
+// ProcessedImage from an upload.
+type ProcessedImage struct {
+	ID   string `json:"id"`
+	Hash string `json:"hash"`
+}
+
+// ImageUploadResponse after uploading one or more images.
+type ImageUploadResponse struct {
+	Processed []ProcessedImage `json:"processed"`
+}

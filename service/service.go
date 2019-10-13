@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"strings"
 	"time"
 
 	"github.com/rickb777/date/period"
@@ -64,4 +68,58 @@ func (service *ImageService) CreateUploadLink(req LinkCreationRequest) (*Ephemer
 		RelativePath: fmt.Sprintf("%s/%s", service.uploadLinkPrefix, linkID),
 		Timestamp:    expiry.Format(time.RFC3339),
 	}, nil
+}
+
+const (
+	streamInvalidUploadID = iota
+	streamSuccess
+)
+
+// StreamImagesToBackend validates the given upload ID and streams file chunks from the given
+// reader to the repository.
+func (service *ImageService) StreamImagesToBackend(linkID string, reader *multipart.Reader) (*ImageUploadResponse, int) {
+	if service.repository.hasExpired(linkID) {
+		return nil, streamInvalidUploadID
+	}
+
+	response := ImageUploadResponse{
+		Processed: []ProcessedImage{},
+	}
+
+	buf := make([]byte, 256)
+	for {
+		hasher := sha256.New()
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+
+		ctype := part.Header.Get("Content-Type")
+		if ctype == "" || !strings.HasPrefix(ctype, "image/") {
+			// We don't know what kind of image we're looking at.
+			continue
+		}
+
+		imageID := randomAlphanumeric(64)
+		var n int
+		for {
+			n, err = part.Read(buf)
+			slice := make([]byte, len(buf[:n]))
+			copy(slice, buf[:n])
+			// FIXME: Should we do this for each part instead? (That's what AWS does for S3).
+			hasher.Write(slice)
+			service.repository.sendChunk(imageID, slice)
+
+			if err == io.EOF && n == 0 {
+				break
+			}
+		}
+
+		response.Processed = append(response.Processed, ProcessedImage{
+			ID:   imageID,
+			Hash: fmt.Sprintf("%x", hasher.Sum(nil)),
+		})
+	}
+
+	return &response, streamSuccess
 }
