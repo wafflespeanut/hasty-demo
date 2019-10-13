@@ -16,6 +16,7 @@ type DataStore interface {
 	getUploadExpiry(id string) (*time.Time, error)
 	addImageMeta(meta ImageMeta) error
 	fetchImageMeta(id string) (*ImageMeta, error)
+	fetchMetaForHash(hash string) (*ImageMeta, error)
 	updateImageMeta(meta ImageMeta) error
 	getServiceStats() (*ServiceStats, error)
 }
@@ -24,6 +25,7 @@ type DataStore interface {
 type ObjectStore interface {
 	storeChunk(id string, chunk []byte, isFinal bool)
 	retrieveChunks(id string, stream chan<- Chunk)
+	discardObject(id string)
 	getImageReader(id string) (io.Reader, error)
 	cleanupImageReader(id string, reader io.Reader) error
 }
@@ -36,6 +38,9 @@ func (NoOpStore) addUploadID(id string, expiry time.Time) error { return nil }
 func (NoOpStore) addImageMeta(meta ImageMeta) error             { return nil }
 func (NoOpStore) updateImageMeta(meta ImageMeta) error          { return nil }
 func (NoOpStore) getUploadExpiry(id string) (*time.Time, error) {
+	return nil, errors.New("no-op")
+}
+func (NoOpStore) fetchMetaForHash(hash string) (*ImageMeta, error) {
 	return nil, errors.New("no-op")
 }
 func (NoOpStore) fetchImageMeta(id string) (*ImageMeta, error) {
@@ -122,6 +127,10 @@ func (store *FileStore) retrieveChunks(id string, stream chan<- Chunk) {
 			break
 		}
 	}
+}
+
+func (store *FileStore) discardObject(id string) {
+	os.Remove(filepath.Join(store.pathPrefix, id))
 }
 
 func (store *FileStore) getImageReader(id string) (io.Reader, error) {

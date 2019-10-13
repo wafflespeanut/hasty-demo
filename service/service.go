@@ -141,6 +141,13 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		log.Printf("Processed %s (image ID: %s)\n", fileName, imageID)
 		contentHash := fmt.Sprintf("%x", hasher.Sum(nil))
 
+		existingImageID := service.repository.fetchIDForHash(contentHash)
+		if existingImageID != "" {
+			log.Printf("Discarding possible duplicate image (ID: %s)\n", imageID)
+			service.repository.discardChunks(imageID)
+			imageID = existingImageID
+		}
+
 		response.Processed = append(response.Processed, ProcessedImage{
 			Filename: fileName,
 			ID:       imageID,
@@ -156,10 +163,13 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 			Uploaded:  time.Now().UTC(),
 		}
 
-		// Add known metadata for now.
-		service.repository.addImageData(meta)
-		// ... and queue the image for getting additional data.
-		service.repository.queueImageForAnalysis(meta)
+		// Update the repository only if we've encountered a new image.
+		if existingImageID == "" {
+			// Add known metadata for now.
+			service.repository.addImageData(meta)
+			// ... and queue the image for getting additional data.
+			service.repository.queueImageForAnalysis(meta)
+		}
 	}
 
 	return &response, streamSuccess

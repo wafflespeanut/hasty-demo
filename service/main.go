@@ -15,15 +15,16 @@ const (
 	envStorePath   = "STORE_PATH"
 	envPostgresURL = "POSTGRES_URL"
 
-	defaultBufSize           = 512
-	defaultPort              = 3000
-	defaultLinkCacheCapacity = 1000
-	defaultMetaCacheCapacity = 250
-	defaultStorePath         = "./store"
-	defaultUploadLinkPrefix  = "/uploads"
-	minExpirySeconds         = 30
-	uploadLinkIDLength       = 48
-	imageIDLength            = 48
+	defaultBufSize             = 512
+	defaultPort                = 3000
+	defaultLinkCacheCapacity   = 1000
+	defaultMetaCacheCapacity   = 250
+	defaultHashesCacheCapacity = 1000
+	defaultStorePath           = "./store"
+	defaultUploadLinkPrefix    = "/uploads"
+	minExpirySeconds           = 30
+	uploadLinkIDLength         = 48
+	imageIDLength              = 48
 
 	headerAccessToken = "X-Access-Token"
 	headerContentType = "Content-Type"
@@ -37,6 +38,7 @@ func main() {
 	portPtr := flag.Uint("port", defaultPort, "Listening port")
 	linksCacheCapPtr := flag.Uint("cache-links", defaultLinkCacheCapacity, "Cache capacity for upload links")
 	metaCacheCapPtr := flag.Uint("cache-meta", defaultLinkCacheCapacity, "Cache capacity for image metadata")
+	hashesCacheCapPtr := flag.Uint("cache-hashes", defaultHashesCacheCapacity, "Cache capacity for image hashes")
 
 	token := os.Getenv(envAccessToken)
 	if token == "" {
@@ -44,7 +46,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	repository, err := initializeRepository(int(*linksCacheCapPtr), int(*metaCacheCapPtr))
+	repository, err := initializeRepository(int(*linksCacheCapPtr), int(*metaCacheCapPtr), int(*hashesCacheCapPtr))
 	if err != nil {
 		fmt.Printf("Error initializing repository: %s", err.Error())
 		os.Exit(1)

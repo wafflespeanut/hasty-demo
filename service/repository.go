@@ -27,13 +27,18 @@ var (
 // Object storage:
 // - If `S3_REGION` and `S3_BUCKET` is set, then AWS S3 store is initialized (unimplemented).
 // - Otherwise, file store is initialized (store path can be set in environment).
-func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, error) {
+func initializeRepository(linkCacheCap, metaCacheCap, hashesCap int) (*ImageRepository, error) {
 	linkCache, err := lru.New(linkCacheCap)
 	if err != nil {
 		return nil, err
 	}
 
 	metaCache, err := lru.New(metaCacheCap)
+	if err != nil {
+		return nil, err
+	}
+
+	hashes, err := lru.New(hashesCap)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +85,7 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 	return &ImageRepository{
 		linkCache,
 		metaCache,
+		hashes,
 		dataStore,
 		objectStore,
 		cmdHub,
@@ -97,6 +103,7 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 type ImageRepository struct {
 	linkCache   *lru.Cache
 	metaCache   *lru.Cache
+	hashes      *lru.Cache
 	dataStore   DataStore
 	objectStore ObjectStore
 	cmdHub      MessageHub
@@ -129,9 +136,11 @@ const (
 	cmdFetchExpiry
 	cmdAddMeta
 	cmdFetchMeta
+	cmdFetchIDForHash
 	cmdUpdateMeta
 	cmdStoreChunk
 	cmdFetchChunks
+	cmdDiscardObject
 	cmdAnalyzeImage
 	cmdFetchStats
 )
@@ -166,6 +175,16 @@ func (r *ImageRepository) hasExpired(linkID string) bool {
 	return diff.Seconds() <= 0
 }
 
+// fetchIDForHash of an image (if it exists, then we have a possible duplicate).
+func (r *ImageRepository) fetchIDForHash(hash string) string {
+	r.cmdHub.cmdChan <- repoMessage{
+		ty: cmdFetchIDForHash,
+		id: hash,
+	}
+	value := <-r.cmdHub.respChan
+	return value.(string)
+}
+
 // addImageData adds the given metadata for an image.
 func (r *ImageRepository) addImageData(meta ImageMeta) {
 	r.cmdHub.cmdChan <- repoMessage{
@@ -191,12 +210,7 @@ func (r *ImageRepository) fetchImageMeta(id string) *ImageMeta {
 		id: id,
 	}
 	value := <-r.cmdHub.respChan
-	meta, ok := value.(ImageMeta)
-	if !ok {
-		return nil
-	}
-
-	return &meta
+	return value.(*ImageMeta)
 }
 
 // fetchStats collected from the service so far.
@@ -205,20 +219,14 @@ func (r *ImageRepository) fetchStats() *ServiceStats {
 		ty: cmdFetchStats,
 	}
 	value := <-r.cmdHub.respChan
-	stats, ok := value.(*ServiceStats)
-	if !ok {
-		return nil
-	}
-
-	return stats
+	return value.(*ServiceStats)
 }
-
-// FIXME: Cleanup commands handling.
 
 // handleCommands sent by the service.
 //
 // **NOTE:** This is blocking and hence, it must be spawn into a separate goroutine.
 func (r *ImageRepository) handleCommands() {
+	// FIXME: Cleanup and isole commands handling into their own functions.
 	for {
 		cmd := <-r.cmdHub.cmdChan
 		if cmd.ty == cmdCreateUploadID {
@@ -242,6 +250,7 @@ func (r *ImageRepository) handleCommands() {
 		} else if cmd.ty == cmdAddMeta {
 			meta := cmd.data.(ImageMeta)
 			r.metaCache.Add(meta.ID, meta)
+			r.hashes.Add(meta.Hash, meta.ID)
 			r.dataStore.addImageMeta(meta)
 			r.cmdHub.ackChan <- struct{}{}
 		} else if cmd.ty == cmdFetchMeta {
@@ -252,15 +261,26 @@ func (r *ImageRepository) handleCommands() {
 				meta, _ := r.dataStore.fetchImageMeta(cmd.id)
 				if meta != nil {
 					r.metaCache.Add(cmd.id, *meta)
-					r.cmdHub.respChan <- *meta
-				} else {
-					r.cmdHub.respChan <- nil
+					r.hashes.Add(meta.Hash, meta.ID)
 				}
+				r.cmdHub.respChan <- meta
+			}
+		} else if cmd.ty == cmdFetchIDForHash {
+			value, exists := r.hashes.Get(cmd.id)
+			if exists {
+				r.cmdHub.respChan <- value
+			} else {
+				meta, _ := r.dataStore.fetchMetaForHash(cmd.id)
+				if meta != nil {
+					r.metaCache.Add(cmd.id, *meta)
+					r.hashes.Add(meta.Hash, meta.ID)
+				}
+				r.cmdHub.respChan <- meta.ID
 			}
 		} else if cmd.ty == cmdUpdateMeta {
 			meta := cmd.data.(ImageMeta)
-			r.metaCache.Remove(meta.ID)
 			r.metaCache.Add(meta.ID, meta)
+			r.hashes.Add(meta.Hash, meta.ID)
 			r.dataStore.updateImageMeta(meta)
 			r.cmdHub.ackChan <- struct{}{}
 		} else if cmd.ty == cmdFetchStats {
@@ -297,6 +317,15 @@ func (r *ImageRepository) fetchChunks(id string) <-chan Chunk {
 	return streamChan
 }
 
+// discardChunks corresponding to the given image ID.
+func (r *ImageRepository) discardChunks(id string) {
+	r.streamHub.cmdChan <- repoMessage{
+		ty: cmdDiscardObject,
+		id: id,
+	}
+	_ = <-r.streamHub.ackChan
+}
+
 // Chunk represents a streamable chunk.
 type Chunk struct {
 	bytes   []byte
@@ -320,6 +349,9 @@ func (r *ImageRepository) processChunks() {
 			// block other chunks whilst retrieving this file's chunks.
 			go r.objectStore.retrieveChunks(msg.id, chunkChan)
 			r.streamHub.respChan <- chunkChan
+		} else if msg.ty == cmdDiscardObject {
+			r.objectStore.discardObject(msg.id)
+			r.streamHub.ackChan <- struct{}{}
 		}
 	}
 }

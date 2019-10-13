@@ -90,6 +90,19 @@ func (s *PostgreSQLStore) fetchImageMeta(id string) (*ImageMeta, error) {
 	return &meta, nil
 }
 
+func (s *PostgreSQLStore) fetchMetaForHash(hash string) (*ImageMeta, error) {
+	db, err := s.getConnection()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var meta ImageMeta
+	db.Where("hash = ?", hash).First(&meta)
+
+	return &meta, nil
+}
+
 func (s *PostgreSQLStore) getServiceStats() (*ServiceStats, error) {
 	db, err := s.getConnection()
 	if err != nil {
