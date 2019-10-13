@@ -7,6 +7,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/rwcarlsen/goexif/exif"
 )
 
 var (
@@ -56,17 +57,9 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 		openFds:    make(map[string]*os.File),
 	}
 
-	cmdHub := MessageHub{
-		cmdChan:  make(chan repoMessage),
-		respChan: make(chan interface{}),
-		ackChan:  make(chan struct{}),
-	}
-
-	streamHub := MessageHub{
-		cmdChan:  make(chan repoMessage),
-		respChan: make(chan interface{}),
-		ackChan:  make(chan struct{}),
-	}
+	cmdHub := NewMessageHub()
+	streamHub := NewMessageHub()
+	imageHub := NewMessageHub()
 
 	return &ImageRepository{
 		linkCache,
@@ -75,6 +68,7 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 		objectStore,
 		cmdHub,
 		streamHub,
+		imageHub,
 	}, nil
 }
 
@@ -91,6 +85,24 @@ type ImageRepository struct {
 	objectStore ObjectStore
 	cmdHub      MessageHub
 	streamHub   MessageHub
+	imageHub    MessageHub
+}
+
+// MessageHub has a bunch of channels for passing commands from the service,
+// handling them in the repository, persisting/retrieving from the store, etc.
+type MessageHub struct {
+	cmdChan  chan repoMessage
+	respChan chan interface{}
+	ackChan  chan struct{}
+}
+
+// NewMessageHub for creating a new hub.
+func NewMessageHub() MessageHub {
+	return MessageHub{
+		cmdChan:  make(chan repoMessage),
+		respChan: make(chan interface{}),
+		ackChan:  make(chan struct{}),
+	}
 }
 
 type repoCmdType int
@@ -99,10 +111,12 @@ type repoCmdType int
 const (
 	cmdCreateUploadID = iota
 	cmdFetchExpiry
-	cmdAddImage
+	cmdAddMeta
 	cmdFetchMeta
+	cmdUpdateMeta
 	cmdStoreChunk
 	cmdFetchChunks
+	cmdAnalyzeImage
 )
 
 // Message used within the repository.
@@ -138,7 +152,16 @@ func (r *ImageRepository) hasExpired(linkID string) bool {
 // addImageData adds the given metadata for an image.
 func (r *ImageRepository) addImageData(meta ImageMeta) {
 	r.cmdHub.cmdChan <- repoMessage{
-		ty:   cmdAddImage,
+		ty:   cmdAddMeta,
+		data: meta,
+	}
+	_ = <-r.cmdHub.ackChan
+}
+
+// updateImageData updates existing metadata for an image.
+func (r *ImageRepository) updateImageData(meta ImageMeta) {
+	r.cmdHub.cmdChan <- repoMessage{
+		ty:   cmdUpdateMeta,
 		data: meta,
 	}
 	_ = <-r.cmdHub.ackChan
@@ -159,16 +182,9 @@ func (r *ImageRepository) fetchImageMeta(id string) *ImageMeta {
 	return &meta
 }
 
-// MessageHub has a bunch of channels for passing commands from the service,
-// handling them in the repository, persisting/retrieving from the store, etc.
-type MessageHub struct {
-	cmdChan  chan repoMessage
-	respChan chan interface{}
-	ackChan  chan struct{}
-}
-
-// handleCommands for this repository. NOTE: This is blocking and hence,
-// it must be spawn into a separate goroutine.
+// handleCommands sent by the service.
+//
+// **NOTE:** This is blocking and hence, it must be spawn into a separate goroutine.
 func (r *ImageRepository) handleCommands() {
 	for {
 		cmd := <-r.cmdHub.cmdChan
@@ -184,7 +200,7 @@ func (r *ImageRepository) handleCommands() {
 				// FIXME: Check store.
 				r.cmdHub.respChan <- defaultExpiry
 			}
-		} else if cmd.ty == cmdAddImage {
+		} else if cmd.ty == cmdAddMeta {
 			meta := cmd.data.(ImageMeta)
 			r.metaCache.Add(meta.ID, meta)
 			// FIXME: Persist in store.
@@ -194,8 +210,15 @@ func (r *ImageRepository) handleCommands() {
 			if exists {
 				r.cmdHub.respChan <- value
 			} else {
+				// FIXME: Check store
 				r.cmdHub.respChan <- nil
 			}
+		} else if cmd.ty == cmdUpdateMeta {
+			meta := cmd.data.(ImageMeta)
+			r.metaCache.Remove(meta.ID)
+			r.metaCache.Add(meta.ID, meta)
+			// FIXME: Persist in store.
+			r.cmdHub.ackChan <- struct{}{}
 		}
 	}
 }
@@ -234,8 +257,9 @@ type Chunk struct {
 	err     error
 }
 
-// processChunks from store to the service and vice versa. NOTE: This is
-// blocking and hence, it must be spawn into a separate goroutine.
+// processChunks from store to the service and vice versa.
+//
+// **NOTE:** This is blocking and hence, it must be spawn into a separate goroutine.
 func (r *ImageRepository) processChunks() {
 	for {
 		msg := <-r.streamHub.cmdChan
@@ -253,11 +277,56 @@ func (r *ImageRepository) processChunks() {
 	}
 }
 
+// MARK: Processing layer
+
+func (r *ImageRepository) queueImageForAnalysis(meta ImageMeta) {
+	r.imageHub.cmdChan <- repoMessage{
+		ty:   cmdAnalyzeImage,
+		data: meta,
+	}
+}
+
 // processImages we've stored so far. We've already done sanitation checks
 // when we received the image, so now we just need to update the metadata
 // by processing the tags.
+//
+// **NOTE:** This is blocking and hence, it must be spawn into a separate goroutine.
 func (r *ImageRepository) processImages() {
 	for {
+		msg := <-r.imageHub.cmdChan
+		if msg.ty == cmdAnalyzeImage {
+			data := msg.data
+			meta := data.(ImageMeta)
+			meta.applyDefaults()
 
+			reader, err := r.objectStore.getImageReader(meta.ID)
+			if err != nil {
+				log.Printf("Cannot obtain reader for image (ID: %s): %s\n", meta.ID, err.Error())
+				r.updateImageData(meta)
+				continue
+			}
+
+			x, err := exif.Decode(reader)
+			if err != nil {
+				log.Printf("Cannot decode exif data from image (ID: %s): %s\n", meta.ID, err.Error())
+				r.updateImageData(meta)
+				continue
+			}
+
+			// NOTE: Right now, we're only worried about the camera model,
+			// but we can always get more.
+
+			value, err := x.Get(exif.Model)
+			if err == nil {
+				meta.CameraModel = value.String()
+			}
+
+			err = r.objectStore.cleanupImageReader(meta.ID, reader)
+			if err != nil {
+				log.Printf("Error cleaning up reader (id: %s): %s\n", meta.ID, err.Error())
+			}
+
+			r.updateImageData(meta)
+		}
 	}
 }

@@ -63,7 +63,7 @@ func (service *ImageService) CreateUploadLink(req LinkCreationRequest) (*Ephemer
 		return nil, errInvalidExpiryTime
 	}
 
-	linkID := randomAlphanumeric(64)
+	linkID := randomAlphanumeric(48)
 	service.repository.createUploadID(linkID, expiry)
 
 	return &EphemeralLinkResponse{
@@ -93,14 +93,14 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		Processed: []ProcessedImage{},
 	}
 
-	buf := make([]byte, 256)
+	buf := make([]byte, defaultBufSize)
 	for {
 		part, err := reader.NextPart()
 		if err == io.EOF {
 			break
 		}
 
-		ctype := part.Header.Get("Content-Type")
+		ctype := part.Header.Get(headerContentType)
 		if ctype == "" || !strings.HasPrefix(ctype, "image/") {
 			// Ignore this part if this is not an image. We can bail out
 			// with an error in the future, if needed.
@@ -108,7 +108,7 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		}
 
 		hasher := sha256.New()
-		imageID := randomAlphanumeric(64)
+		imageID := randomAlphanumeric(48)
 		fileName := part.FileName()
 
 		var totalBytes int
@@ -116,6 +116,7 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 			n, err := part.Read(buf)
 			totalBytes += n
 
+			// Make new slice as we'll update the existing slice in the next read.
 			slice := make([]byte, len(buf[:n]))
 			copy(slice, buf[:n])
 			// FIXME: Right now we're doing this for a file. Should we do this for
@@ -141,13 +142,21 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 			Filename: fileName,
 			ID:       imageID,
 			Hash:     contentHash,
+			Size:     uint(totalBytes),
 		})
-		service.repository.addImageData(ImageMeta{
+
+		meta := ImageMeta{
 			ID:        imageID,
 			Hash:      contentHash,
 			MediaType: ctype,
 			Size:      uint(totalBytes),
-		})
+			Uploaded:  time.Now().UTC(),
+		}
+
+		// Add known metadata for now.
+		service.repository.addImageData(meta)
+		// ... and queue the image for getting additional data.
+		service.repository.queueImageForAnalysis(meta)
 	}
 
 	return &response, streamSuccess
@@ -160,7 +169,7 @@ func (service *ImageService) StreamImageFromBackend(imageID string, h http.Heade
 		return streamInvalidImage
 	}
 
-	h.Set("Content-Type", meta.MediaType)
+	h.Set(headerContentType, meta.MediaType)
 
 	streamChan := service.repository.fetchChunks(imageID)
 	for {

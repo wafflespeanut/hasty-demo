@@ -70,10 +70,8 @@ func (service *ImageService) fetchImage(w http.ResponseWriter, r *http.Request) 
 	code := service.StreamImageFromBackend(imageID, w.Header(), w)
 	if code == streamInvalidImage {
 		respondError(w, "Invalid image ID", http.StatusNotFound)
-		return
 	} else if code == streamFailure {
 		respondError(w, "Unable to stream image", http.StatusInternalServerError)
-		return
 	}
 }
 
@@ -89,7 +87,7 @@ func (amw *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 		if token == amw.accessToken {
 			next.ServeHTTP(w, r)
 		} else {
-			http.Error(w, "You're not allowed to perform that action.", http.StatusForbidden)
+			respondError(w, "You're not allowed to perform that action.", http.StatusForbidden)
 		}
 	})
 }

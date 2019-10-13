@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 // LinkCreationRequest for creating ephemeral links.
 type LinkCreationRequest struct {
 	// Duration (from now) in ISO 8601 duration format.
@@ -26,6 +28,7 @@ type ProcessedImage struct {
 	Filename string `json:"name"`
 	ID       string `json:"id"`
 	Hash     string `json:"hash"`
+	Size     uint   `json:"size"`
 }
 
 // ImageUploadResponse after uploading one or more images.
@@ -35,8 +38,15 @@ type ImageUploadResponse struct {
 
 // ImageMeta for holding metadata for images.
 type ImageMeta struct {
-	ID        string `json:"id"`
-	Hash      string `json:"hash"`
-	MediaType string `json:"mediaType"`
-	Size      uint   `json:"size"`
+	ID          string    `json:"id"`
+	Hash        string    `json:"hash"`
+	MediaType   string    `json:"mediaType"`
+	Size        uint      `json:"size"`
+	Uploaded    time.Time `json:"uploadedOn"`
+	CameraModel string    `json:"cameraModel,omitempty"`
+}
+
+// applyDefaults for unknown metadata.
+func (m *ImageMeta) applyDefaults() {
+	m.CameraModel = "unknown"
 }

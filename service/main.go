@@ -14,6 +14,7 @@ const (
 	envAccessToken = "ACCESS_TOKEN"
 	envStorePath   = "STORE_PATH"
 
+	defaultBufSize           = 512
 	defaultPort              = 3000
 	defaultLinkCacheCapacity = 1000
 	defaultMetaCacheCapacity = 250
@@ -22,6 +23,7 @@ const (
 	minExpirySeconds         = 30
 
 	headerAccessToken = "X-Access-Token"
+	headerContentType = "Content-Type"
 )
 
 func main() {
@@ -46,6 +48,7 @@ func main() {
 
 	go repository.handleCommands()
 	go repository.processChunks()
+	go repository.processImages()
 
 	service := &ImageService{
 		accessToken:      token,

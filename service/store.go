@@ -18,6 +18,8 @@ type DataStore interface {
 type ObjectStore interface {
 	storeChunk(id string, chunk []byte, isFinal bool)
 	retrieveChunks(id string, stream chan<- Chunk)
+	getImageReader(id string) (io.Reader, error)
+	cleanupImageReader(id string, reader io.Reader) error
 }
 
 // NoOpStore which does nothing.
@@ -25,6 +27,8 @@ type NoOpStore struct{}
 
 func (NoOpStore) addUploadID(id string, expiry time.Time) {}
 func (NoOpStore) getUploadExpiry(id string)               {}
+
+// MARK: File store.
 
 // FileStore is used for persisting objects in the system disk.
 // Note that this must not be accessed from multiple goroutines.
@@ -76,7 +80,7 @@ func (store *FileStore) retrieveChunks(id string, stream chan<- Chunk) {
 		return
 	}
 
-	buf := make([]byte, 256)
+	buf := make([]byte, defaultBufSize)
 	for {
 		n, err := fd.Read(buf)
 		slice := make([]byte, len(buf[:n]))
@@ -101,4 +105,17 @@ func (store *FileStore) retrieveChunks(id string, stream chan<- Chunk) {
 			break
 		}
 	}
+}
+
+func (store *FileStore) getImageReader(id string) (io.Reader, error) {
+	return os.Open(filepath.Join(store.pathPrefix, id))
+}
+
+func (store *FileStore) cleanupImageReader(id string, reader io.Reader) error {
+	fd, ok := reader.(*os.File)
+	if ok {
+		fd.Close()
+	}
+
+	return nil
 }
