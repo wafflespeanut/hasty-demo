@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,18 +12,17 @@ import (
 type DataStore interface {
 	addUploadID(id string, expiry time.Time)
 	getUploadExpiry(id string)
-	addImageData()
 }
 
 // ObjectStore is the persistence layer for storing and retrieving objects.
 type ObjectStore interface {
 	storeChunk(id string, chunk []byte, isFinal bool)
+	retrieveChunks(id string, stream chan<- Chunk)
 }
 
 // NoOpStore which does nothing.
 type NoOpStore struct{}
 
-func (NoOpStore) addImageData()                           {}
 func (NoOpStore) addUploadID(id string, expiry time.Time) {}
 func (NoOpStore) getUploadExpiry(id string)               {}
 
@@ -47,16 +47,58 @@ func (store *FileStore) storeChunk(id string, chunk []byte, isFinal bool) {
 			log.Printf("Error creating file for image (ID: %s): %s\n", id, err.Error())
 			return
 		}
+
+		store.openFds[id] = fd
 	}
 
 	_, err = fd.Write(chunk)
 	if err != nil {
 		log.Printf("Error writing chunk to file (image ID: %s): %s\n", id, err.Error())
+	}
+
+	if isFinal || err != nil {
+		fd.Close()
+		delete(store.openFds, id)
+	}
+}
+
+func (store *FileStore) retrieveChunks(id string, stream chan<- Chunk) {
+	fd, err := os.Open(filepath.Join(store.pathPrefix, id))
+	defer fd.Close()
+
+	if err != nil {
+		stream <- Chunk{
+			bytes:   []byte{},
+			isFinal: true,
+			err:     err,
+		}
+
 		return
 	}
 
-	if isFinal {
-		fd.Close()
-		delete(store.openFds, id)
+	buf := make([]byte, 256)
+	for {
+		n, err := fd.Read(buf)
+		slice := make([]byte, len(buf[:n]))
+		copy(slice, buf[:n])
+
+		stream <- Chunk{
+			bytes:   slice,
+			isFinal: n == 0,
+			err:     err,
+		}
+
+		if err == io.EOF {
+			if n != 0 {
+				// Send final chunk to end stream.
+				stream <- Chunk{
+					bytes:   []byte{},
+					isFinal: n == 0,
+					err:     nil,
+				}
+			}
+
+			break
+		}
 	}
 }

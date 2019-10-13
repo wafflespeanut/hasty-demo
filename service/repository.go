@@ -23,8 +23,8 @@ var (
 // - Otherwise, a no-op store is initialized.
 //
 // Object storage:
-// - File store is always initialized.
 // - If `S3_REGION` and `S3_BUCKET` is set, then AWS S3 store is initialized (unimplemented).
+// - Otherwise, file store is initialized (store path can be set in environment).
 func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, error) {
 	linkCache, err := lru.New(linkCacheCap)
 	if err != nil {
@@ -46,18 +46,23 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 	}
 
 	storePathPrefix = strings.TrimSuffix(storePathPrefix, "/")
+	err = os.MkdirAll(storePathPrefix, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
 	objectStore := &FileStore{
 		pathPrefix: storePathPrefix,
 		openFds:    make(map[string]*os.File),
 	}
 
-	cmdHub := CommandHub{
+	cmdHub := MessageHub{
 		cmdChan:  make(chan repoMessage),
 		respChan: make(chan interface{}),
 		ackChan:  make(chan struct{}),
 	}
 
-	dataHub := ObjectHub{
+	streamHub := MessageHub{
 		cmdChan:  make(chan repoMessage),
 		respChan: make(chan interface{}),
 		ackChan:  make(chan struct{}),
@@ -69,9 +74,12 @@ func initializeRepository(linkCacheCap, metaCacheCap int) (*ImageRepository, err
 		dataStore,
 		objectStore,
 		cmdHub,
-		dataHub,
+		streamHub,
 	}, nil
 }
+
+// FIXME: Repository should be split later for caching, processing and streaming.
+// i.e., each hub should be part of its own repository.
 
 // ImageRepository acts as the bridge between service handlers and the configured storage.
 // It has a queue for asynchronously streaming images back and forth and has an LRU cache
@@ -81,8 +89,8 @@ type ImageRepository struct {
 	metaCache   *lru.Cache
 	dataStore   DataStore
 	objectStore ObjectStore
-	cmdHub      CommandHub
-	dataHub     ObjectHub
+	cmdHub      MessageHub
+	streamHub   MessageHub
 }
 
 type repoCmdType int
@@ -92,7 +100,9 @@ const (
 	cmdCreateUploadID = iota
 	cmdFetchExpiry
 	cmdAddImage
-	chunkStore
+	cmdFetchMeta
+	cmdStoreChunk
+	cmdFetchChunks
 )
 
 // Message used within the repository.
@@ -101,6 +111,8 @@ type repoMessage struct {
 	id   string
 	data interface{}
 }
+
+// MARK: API layer.
 
 // createUploadID binds the given ID to the given expiry time.
 func (r *ImageRepository) createUploadID(linkID string, expiry time.Time) {
@@ -120,25 +132,36 @@ func (r *ImageRepository) hasExpired(linkID string) bool {
 	}
 	expiry := <-r.cmdHub.respChan
 	diff := expiry.(time.Time).Sub(time.Now().UTC())
-	return diff.Seconds() > 0
+	return diff.Seconds() <= 0
 }
 
-// sendChunk to the store. Since this goes through a channel all the way
-// to the store, where it may be buffered before sending to the actual storage,
-// the slice must retain its data. Hence, it's important to send a fresh copy
-// of buffer. If we've reached EOF, then this must be called with an empty chunk.
-func (r *ImageRepository) sendChunk(id string, chunk []byte) {
-	r.dataHub.cmdChan <- repoMessage{
-		ty:   chunkStore,
-		id:   id,
-		data: chunk,
+// addImageData adds the given metadata for an image.
+func (r *ImageRepository) addImageData(meta ImageMeta) {
+	r.cmdHub.cmdChan <- repoMessage{
+		ty:   cmdAddImage,
+		data: meta,
 	}
-	_ = <-r.dataHub.ackChan
+	_ = <-r.cmdHub.ackChan
 }
 
-// CommandHub is responsible for passing commands from the service,
-// handling them in the repository and getting the response.
-type CommandHub struct {
+// fetchImageMeta for the given image ID.
+func (r *ImageRepository) fetchImageMeta(id string) *ImageMeta {
+	r.cmdHub.cmdChan <- repoMessage{
+		ty: cmdFetchMeta,
+		id: id,
+	}
+	value := <-r.cmdHub.respChan
+	meta, ok := value.(ImageMeta)
+	if !ok {
+		return nil
+	}
+
+	return &meta
+}
+
+// MessageHub has a bunch of channels for passing commands from the service,
+// handling them in the repository, persisting/retrieving from the store, etc.
+type MessageHub struct {
 	cmdChan  chan repoMessage
 	respChan chan interface{}
 	ackChan  chan struct{}
@@ -148,40 +171,93 @@ type CommandHub struct {
 // it must be spawn into a separate goroutine.
 func (r *ImageRepository) handleCommands() {
 	for {
-		select {
-		case cmd := <-r.cmdHub.cmdChan:
-			if cmd.ty == cmdCreateUploadID {
-				r.linkCache.Add(cmd.id, cmd.data)
-				r.cmdHub.ackChan <- struct{}{}
-			} else if cmd.ty == cmdFetchExpiry {
-				value, exists := r.linkCache.Get(cmd.id)
-				if exists {
-					r.cmdHub.respChan <- value
-				} else {
-					r.cmdHub.respChan <- defaultExpiry
-				}
+		cmd := <-r.cmdHub.cmdChan
+		if cmd.ty == cmdCreateUploadID {
+			r.linkCache.Add(cmd.id, cmd.data)
+			// FIXME: Persist in store.
+			r.cmdHub.ackChan <- struct{}{}
+		} else if cmd.ty == cmdFetchExpiry {
+			value, exists := r.linkCache.Get(cmd.id)
+			if exists {
+				r.cmdHub.respChan <- value
+			} else {
+				// FIXME: Check store.
+				r.cmdHub.respChan <- defaultExpiry
+			}
+		} else if cmd.ty == cmdAddImage {
+			meta := cmd.data.(ImageMeta)
+			r.metaCache.Add(meta.ID, meta)
+			// FIXME: Persist in store.
+			r.cmdHub.ackChan <- struct{}{}
+		} else if cmd.ty == cmdFetchMeta {
+			value, exists := r.metaCache.Get(cmd.id)
+			if exists {
+				r.cmdHub.respChan <- value
+			} else {
+				r.cmdHub.respChan <- nil
 			}
 		}
 	}
 }
 
-// ObjectHub is responsible for proxying object chunks through this
-// repository to/from the store.
-type ObjectHub struct {
-	cmdChan  chan repoMessage
-	respChan chan interface{}
-	ackChan  chan struct{}
+// MARK: Streaming layer.
+
+// sendChunk for the given image ID to the store. Since this goes through
+// a channel all the way to the store, where it may be buffered before
+// sending to the actual storage, the slice must retain its data. Hence,
+// it's important to send a fresh copy of buffer. If we've reached EOF,
+// then this must be called with an empty chunk.
+func (r *ImageRepository) sendChunk(id string, chunk []byte) {
+	r.streamHub.cmdChan <- repoMessage{
+		ty:   cmdStoreChunk,
+		id:   id,
+		data: chunk,
+	}
+	_ = <-r.streamHub.ackChan
+}
+
+// fetchChunks for the given image ID and return a channel to stream them.
+func (r *ImageRepository) fetchChunks(id string) <-chan Chunk {
+	r.streamHub.cmdChan <- repoMessage{
+		ty: cmdFetchChunks,
+		id: id,
+	}
+	value := <-r.streamHub.respChan
+	streamChan := value.(chan Chunk)
+	return streamChan
+}
+
+// Chunk represents a streamable chunk.
+type Chunk struct {
+	bytes   []byte
+	isFinal bool
+	err     error
 }
 
 // processChunks from store to the service and vice versa. NOTE: This is
 // blocking and hence, it must be spawn into a separate goroutine.
 func (r *ImageRepository) processChunks() {
 	for {
-		msg := <-r.dataHub.cmdChan
-		if msg.ty == chunkStore {
+		msg := <-r.streamHub.cmdChan
+		if msg.ty == cmdStoreChunk {
 			bytes := msg.data.([]byte)
 			r.objectStore.storeChunk(msg.id, bytes, len(bytes) == 0)
-			r.dataHub.ackChan <- struct{}{}
+			r.streamHub.ackChan <- struct{}{}
+		} else if msg.ty == cmdFetchChunks {
+			chunkChan := make(chan Chunk)
+			// Spawn in a separate goroutine because we don't wanna
+			// block other chunks whilst retrieving this file's chunks.
+			go r.objectStore.retrieveChunks(msg.id, chunkChan)
+			r.streamHub.respChan <- chunkChan
 		}
+	}
+}
+
+// processImages we've stored so far. We've already done sanitation checks
+// when we received the image, so now we just need to update the metadata
+// by processing the tags.
+func (r *ImageRepository) processImages() {
+	for {
+
 	}
 }

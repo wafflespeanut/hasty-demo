@@ -23,11 +23,20 @@ type ErrorResponse struct {
 
 // ProcessedImage from an upload.
 type ProcessedImage struct {
-	ID   string `json:"id"`
-	Hash string `json:"hash"`
+	Filename string `json:"name"`
+	ID       string `json:"id"`
+	Hash     string `json:"hash"`
 }
 
 // ImageUploadResponse after uploading one or more images.
 type ImageUploadResponse struct {
 	Processed []ProcessedImage `json:"processed"`
+}
+
+// ImageMeta for holding metadata for images.
+type ImageMeta struct {
+	ID        string `json:"id"`
+	Hash      string `json:"hash"`
+	MediaType string `json:"mediaType"`
+	Size      uint   `json:"size"`
 }

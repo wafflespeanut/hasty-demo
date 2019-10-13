@@ -73,12 +73,12 @@ func createService() *ImageService {
 			pathPrefix: "./",
 			openFds:    make(map[string]*os.File),
 		},
-		cmdHub: CommandHub{
+		cmdHub: MessageHub{
 			cmdChan:  make(chan repoMessage),
 			respChan: make(chan interface{}),
 			ackChan:  make(chan struct{}),
 		},
-		dataHub: ObjectHub{
+		streamHub: MessageHub{
 			cmdChan:  make(chan repoMessage),
 			respChan: make(chan interface{}),
 			ackChan:  make(chan struct{}),

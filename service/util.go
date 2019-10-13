@@ -44,11 +44,10 @@ func respondJSON(w http.ResponseWriter, value interface{}) error {
 
 // respondError in the response with the given message and status code.
 func respondError(w http.ResponseWriter, msg string, code int) {
+	w.WriteHeader(code)
 	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 	encoder.Encode(ErrorResponse{
 		Error: msg,
 	})
-
-	w.WriteHeader(code)
 }

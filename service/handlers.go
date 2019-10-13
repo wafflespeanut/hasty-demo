@@ -17,9 +17,7 @@ func (service *ImageService) registerRoutes() {
 
 	ephemeralEndpoint := fmt.Sprintf("%s/{id}", service.uploadLinkPrefix)
 	r.HandleFunc(ephemeralEndpoint, service.handleImageUpload).Methods("POST")
-	r.HandleFunc("/images/{id}", func(w http.ResponseWriter, r *http.Request) {
-		//
-	}).Methods("GET")
+	r.HandleFunc("/images/{id}", service.fetchImage).Methods("GET")
 
 	// Endpoints that require an access token are behind the auth middleware.
 	s := r.PathPrefix("/admin").Subrouter()
@@ -59,9 +57,23 @@ func (service *ImageService) handleImageUpload(w http.ResponseWriter, r *http.Re
 
 	resp, code := service.StreamImagesToBackend(uploadID, reader)
 	if code == streamInvalidUploadID {
-		http.Error(w, "Not Found", http.StatusNotFound)
+		http.Error(w, "404 page not found", http.StatusNotFound)
 	} else {
 		respondJSON(w, resp)
+	}
+}
+
+func (service *ImageService) fetchImage(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	imageID := vars["id"]
+
+	code := service.StreamImageFromBackend(imageID, w.Header(), w)
+	if code == streamInvalidImage {
+		respondError(w, "Invalid image ID", http.StatusNotFound)
+		return
+	} else if code == streamFailure {
+		respondError(w, "Unable to stream image", http.StatusInternalServerError)
+		return
 	}
 }
 
