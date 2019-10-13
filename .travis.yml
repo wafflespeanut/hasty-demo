@@ -1,10 +1,8 @@
-language: go
+sudo: required
 
-go:
-- 1.12.x
+services:
+  - docker
 
 script:
-- cd service
-- go get
-- go build
-- go test
+  - docker run --rm -v "$(pwd)/service":/usr/src/app -w /usr/src/app golang:1.12-stretch go test
+  - docker run --rm -v "$(pwd)/service":/usr/src/app -e CGO_ENABLED=0 -e GOOS=linux -w /usr/src/app golang:1.12-stretch go build -a -installsuffix cgo
