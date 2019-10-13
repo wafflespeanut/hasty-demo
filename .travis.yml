@@ -1,0 +1,10 @@
+language: go
+
+go:
+- 1.12.x
+
+script:
+- cd service
+- go get
+- go build
+- go test
