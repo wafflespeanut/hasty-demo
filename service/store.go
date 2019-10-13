@@ -14,6 +14,10 @@ type DataStore interface {
 	initialize() error
 	addUploadID(id string, expiry time.Time) error
 	getUploadExpiry(id string) (*time.Time, error)
+	addImageMeta(meta ImageMeta) error
+	fetchImageMeta(id string) (*ImageMeta, error)
+	updateImageMeta(meta ImageMeta) error
+	getServiceStats() (*ServiceStats, error)
 }
 
 // ObjectStore is the persistence layer for storing and retrieving objects.
@@ -29,7 +33,15 @@ type NoOpStore struct{}
 
 func (NoOpStore) initialize() error                             { return nil }
 func (NoOpStore) addUploadID(id string, expiry time.Time) error { return nil }
+func (NoOpStore) addImageMeta(meta ImageMeta) error             { return nil }
+func (NoOpStore) updateImageMeta(meta ImageMeta) error          { return nil }
 func (NoOpStore) getUploadExpiry(id string) (*time.Time, error) {
+	return nil, errors.New("no-op")
+}
+func (NoOpStore) fetchImageMeta(id string) (*ImageMeta, error) {
+	return nil, errors.New("no-op")
+}
+func (NoOpStore) getServiceStats() (*ServiceStats, error) {
 	return nil, errors.New("no-op")
 }
 

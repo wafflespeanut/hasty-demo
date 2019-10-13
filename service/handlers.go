@@ -24,9 +24,7 @@ func (service *ImageService) registerRoutes() {
 	s.Use(amw.Middleware)
 
 	s.HandleFunc("/ephemeral-links", service.handleLinkCreation).Methods("POST")
-	s.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		//
-	}).Methods("GET")
+	s.HandleFunc("/stats", service.fetchStats).Methods("GET")
 
 	http.Handle("/", r)
 }
@@ -72,6 +70,15 @@ func (service *ImageService) fetchImage(w http.ResponseWriter, r *http.Request) 
 		respondError(w, "Invalid image ID", http.StatusNotFound)
 	} else if code == streamFailure {
 		respondError(w, "Unable to stream image", http.StatusInternalServerError)
+	}
+}
+
+func (service *ImageService) fetchStats(w http.ResponseWriter, r *http.Request) {
+	stats := service.repository.fetchStats()
+	if stats == nil {
+		respondError(w, "Error collecting stats", http.StatusInternalServerError)
+	} else {
+		respondJSON(w, *stats)
 	}
 }
 

@@ -133,6 +133,7 @@ const (
 	cmdStoreChunk
 	cmdFetchChunks
 	cmdAnalyzeImage
+	cmdFetchStats
 )
 
 // Message used within the repository.
@@ -198,6 +199,22 @@ func (r *ImageRepository) fetchImageMeta(id string) *ImageMeta {
 	return &meta
 }
 
+// fetchStats collected from the service so far.
+func (r *ImageRepository) fetchStats() *ServiceStats {
+	r.cmdHub.cmdChan <- repoMessage{
+		ty: cmdFetchStats,
+	}
+	value := <-r.cmdHub.respChan
+	stats, ok := value.(*ServiceStats)
+	if !ok {
+		return nil
+	}
+
+	return stats
+}
+
+// FIXME: Cleanup commands handling.
+
 // handleCommands sent by the service.
 //
 // **NOTE:** This is blocking and hence, it must be spawn into a separate goroutine.
@@ -207,7 +224,7 @@ func (r *ImageRepository) handleCommands() {
 		if cmd.ty == cmdCreateUploadID {
 			expiry := cmd.data.(time.Time)
 			r.linkCache.Add(cmd.id, expiry)
-			go r.dataStore.addUploadID(cmd.id, expiry)
+			r.dataStore.addUploadID(cmd.id, expiry)
 			r.cmdHub.ackChan <- struct{}{}
 		} else if cmd.ty == cmdFetchExpiry {
 			value, exists := r.linkCache.Get(cmd.id)
@@ -225,22 +242,30 @@ func (r *ImageRepository) handleCommands() {
 		} else if cmd.ty == cmdAddMeta {
 			meta := cmd.data.(ImageMeta)
 			r.metaCache.Add(meta.ID, meta)
-			// FIXME: Persist in store.
+			r.dataStore.addImageMeta(meta)
 			r.cmdHub.ackChan <- struct{}{}
 		} else if cmd.ty == cmdFetchMeta {
 			value, exists := r.metaCache.Get(cmd.id)
 			if exists {
 				r.cmdHub.respChan <- value
 			} else {
-				// FIXME: Check store
-				r.cmdHub.respChan <- nil
+				meta, _ := r.dataStore.fetchImageMeta(cmd.id)
+				if meta != nil {
+					r.metaCache.Add(cmd.id, *meta)
+					r.cmdHub.respChan <- *meta
+				} else {
+					r.cmdHub.respChan <- nil
+				}
 			}
 		} else if cmd.ty == cmdUpdateMeta {
 			meta := cmd.data.(ImageMeta)
 			r.metaCache.Remove(meta.ID)
 			r.metaCache.Add(meta.ID, meta)
-			// FIXME: Persist in store.
+			r.dataStore.updateImageMeta(meta)
 			r.cmdHub.ackChan <- struct{}{}
+		} else if cmd.ty == cmdFetchStats {
+			stats, _ := r.dataStore.getServiceStats()
+			r.cmdHub.respChan <- stats
 		}
 	}
 }
@@ -324,6 +349,7 @@ func (r *ImageRepository) processImages() {
 			r.updateMetaFromExif(&meta)
 			r.updateFormat(&meta)
 
+			log.Printf("Updating image (ID: %s, size: %d)\n", meta.ID, meta.Size)
 			r.updateImageData(meta)
 		}
 	}
@@ -344,12 +370,18 @@ func (r *ImageRepository) updateMetaFromExif(meta *ImageMeta) {
 		return
 	}
 
-	// NOTE: Right now, we're only worried about the camera model,
-	// but we can always get more.
+	// NOTE: Right now, we're only worried about the camera model
+	// and GPS coords, but we can always get more.
 
 	value, err := x.Get(exif.Model)
 	if err == nil {
 		meta.CameraModel = value.String()
+	}
+
+	lat, long, err := x.LatLong()
+	if err != nil {
+		meta.Latitude = lat
+		meta.Longitude = long
 	}
 
 	err = r.objectStore.cleanupImageReader(meta.ID, reader)

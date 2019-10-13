@@ -27,6 +27,7 @@ const (
 
 	headerAccessToken = "X-Access-Token"
 	headerContentType = "Content-Type"
+	imageMediaType    = "image/"
 )
 
 func main() {

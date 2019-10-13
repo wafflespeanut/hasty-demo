@@ -50,6 +50,33 @@ type ImageMeta struct {
 	Size        uint      `json:"size"`
 	Uploaded    time.Time `json:"uploadedOn"`
 	CameraModel string    `json:"cameraModel,omitempty"`
+	Latitude    float64   `json:"latitude"`
+	Longitude   float64   `json:"longitude"`
+}
+
+// ServiceStats shows statistics for the service.
+type ServiceStats struct {
+	PopularFormat         PopularFormat  `json:"popularFormat"`
+	Top10CameraModels     []CameraModel  `json:"top10CameraModels"`
+	UploadFrequency30Days []DayFrequency `json:"uploadFrequency30Days"`
+}
+
+// PopularFormat represents the image format with the number of uploads.
+type PopularFormat struct {
+	Format  string
+	Uploads uint
+}
+
+// CameraModel represents the camera model with the number of uploads.
+type CameraModel struct {
+	Model   string
+	Uploads uint
+}
+
+// DayFrequency represents a day with the number of uploads.
+type DayFrequency struct {
+	Date    time.Time
+	Uploads uint
 }
 
 // applyDefaults for unknown metadata.
