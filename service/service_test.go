@@ -22,9 +22,9 @@ func TestLinkCreation(t *testing.T) {
 	})
 
 	assert.Nil(err)
-	id := service.repository.linkCache.Keys()[0]
+	id := service.data.linkCache.Keys()[0]
 	assert.EqualValues(fmt.Sprintf("/booya/%s", id), req.RelativePath)
-	expiry, _ := service.repository.linkCache.Get(id)
+	expiry, _ := service.data.linkCache.Get(id)
 	diff := expiry.(time.Time).Sub(reqExpiry)
 	assert.Zero(int(diff.Seconds()))
 
@@ -34,9 +34,9 @@ func TestLinkCreation(t *testing.T) {
 	})
 
 	assert.Nil(err)
-	id = service.repository.linkCache.Keys()[1]
+	id = service.data.linkCache.Keys()[1]
 	assert.EqualValues(fmt.Sprintf("/booya/%s", id), req.RelativePath)
-	expiry, _ = service.repository.linkCache.Get(id)
+	expiry, _ = service.data.linkCache.Get(id)
 	diff = expiry.(time.Time).Sub(now)
 	assert.EqualValues(2*86400+3*3600, int(diff.Seconds()))
 }
@@ -65,26 +65,32 @@ func TestInvalidTimestamp(t *testing.T) {
 func createService() *ImageService {
 	lCache, _ := lru.New(defaultLinkCacheCapacity)
 	mCache, _ := lru.New(defaultMetaCacheCapacity)
-	repo := &ImageRepository{
+	hashes, _ := lru.New(defaultHashesCacheCapacity)
+
+	dataRepo := &DataRepository{
 		linkCache: lCache,
 		metaCache: mCache,
+		hashes:    hashes,
 		dataStore: NoOpStore{},
-		objectStore: &FileStore{
-			pathPrefix: "./",
-			openFds:    make(map[string]*os.File),
-		},
 		cmdHub:    NewMessageHub(),
-		streamHub: NewMessageHub(),
-		imageHub:  NewMessageHub(),
 	}
 
 	// It's fine if all those goroutines keep blocking - they're efficient,
 	// and they'll be killed when the program ends.
-	go repo.handleCommands()
+	go dataRepo.handleCommands()
 
 	return &ImageService{
 		accessToken:      "foobar",
 		uploadLinkPrefix: "/booya",
-		repository:       repo,
+		data:             dataRepo,
+		objects: &ObjectsRepository{
+			data: dataRepo,
+			objectStore: &FileStore{
+				pathPrefix: "./",
+				openFds:    make(map[string]*os.File),
+			},
+			streamHub: NewMessageHub(),
+			imageHub:  NewMessageHub(),
+		},
 	}
 }

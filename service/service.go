@@ -28,7 +28,8 @@ type ImageService struct {
 
 	// uploadLinkPrefix for ephemeral image upload links.
 	uploadLinkPrefix string
-	repository       *ImageRepository
+	data             *DataRepository
+	objects          *ObjectsRepository
 }
 
 // CreateUploadLink validates the given request, creates an upload link and returns
@@ -64,7 +65,7 @@ func (service *ImageService) CreateUploadLink(req LinkCreationRequest) (*Ephemer
 	}
 
 	linkID := randomAlphanumeric(uploadLinkIDLength)
-	service.repository.createUploadID(linkID, expiry)
+	service.data.createUploadID(linkID, expiry)
 
 	return &EphemeralLinkResponse{
 		RelativePath: fmt.Sprintf("%s/%s", service.uploadLinkPrefix, linkID),
@@ -85,7 +86,7 @@ const (
 // StreamImagesToBackend validates the given upload ID and streams file chunks from the given
 // reader to the repository.
 func (service *ImageService) StreamImagesToBackend(linkID string, reader *multipart.Reader) (*ImageUploadResponse, StreamStatus) {
-	if service.repository.hasExpired(linkID) {
+	if service.data.hasExpired(linkID) {
 		return nil, streamInvalidUploadID
 	}
 
@@ -126,12 +127,12 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 			// each part instead? That helps with retrying from the part that was
 			// left out in an event of failure.
 			hasher.Write(slice)
-			service.repository.sendChunk(imageID, slice)
+			service.objects.sendChunk(imageID, slice)
 
 			if err == io.EOF {
 				if n != 0 {
 					// Send an empty chunk to stop streaming.
-					service.repository.sendChunk(imageID, []byte{})
+					service.objects.sendChunk(imageID, []byte{})
 				}
 
 				break
@@ -141,10 +142,10 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		log.Printf("Processed %s (image ID: %s)\n", fileName, imageID)
 		contentHash := fmt.Sprintf("%x", hasher.Sum(nil))
 
-		existingImageID := service.repository.fetchIDForHash(contentHash)
+		existingImageID := service.data.fetchIDForHash(contentHash)
 		if existingImageID != "" {
 			log.Printf("Discarding possible duplicate image (ID: %s)\n", imageID)
-			service.repository.discardChunks(imageID)
+			service.objects.discardChunks(imageID)
 			imageID = existingImageID
 		}
 
@@ -166,9 +167,9 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 		// Update the repository only if we've encountered a new image.
 		if existingImageID == "" {
 			// Add known metadata for now.
-			service.repository.addImageData(meta)
+			service.data.addImageData(meta)
 			// ... and queue the image for getting additional data.
-			service.repository.queueImageForAnalysis(meta)
+			service.objects.queueImageForAnalysis(meta)
 		}
 	}
 
@@ -177,14 +178,14 @@ func (service *ImageService) StreamImagesToBackend(linkID string, reader *multip
 
 // StreamImageFromBackend if an image exists for the given image ID.
 func (service *ImageService) StreamImageFromBackend(imageID string, h http.Header, w io.Writer) StreamStatus {
-	meta := service.repository.fetchImageMeta(imageID)
+	meta := service.data.fetchImageMeta(imageID)
 	if meta == nil {
 		return streamInvalidImage
 	}
 
 	h.Set(headerContentType, meta.MediaType)
 
-	streamChan := service.repository.fetchChunks(imageID)
+	streamChan := service.objects.fetchChunks(imageID)
 	for {
 		chunk := <-streamChan
 		if chunk.err != nil && chunk.err != io.EOF {

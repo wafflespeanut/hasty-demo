@@ -74,7 +74,7 @@ func (service *ImageService) fetchImage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (service *ImageService) fetchStats(w http.ResponseWriter, r *http.Request) {
-	stats := service.repository.fetchStats()
+	stats := service.data.fetchStats()
 	if stats == nil {
 		respondError(w, "Error collecting stats", http.StatusInternalServerError)
 	} else {

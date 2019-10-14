@@ -46,19 +46,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	repository, err := initializeRepository(int(*linksCacheCapPtr), int(*metaCacheCapPtr), int(*hashesCacheCapPtr))
+	dataRepo, err := NewDataRepository(int(*linksCacheCapPtr), int(*metaCacheCapPtr), int(*hashesCacheCapPtr))
 	if err != nil {
-		fmt.Printf("Error initializing repository: %s", err.Error())
+		fmt.Printf("Error initializing data repository: %s", err.Error())
 		os.Exit(1)
 	}
 
-	go repository.handleCommands() // for processing API commands.
-	go repository.processChunks()  // for streaming images back and forth.
-	go repository.processImages()  // for processing stored images one by one.
+	objectsRepo, err := NewObjectsRepository(dataRepo)
+	if err != nil {
+		fmt.Printf("Error initializing objects repository: %s", err.Error())
+		os.Exit(1)
+	}
+
+	go dataRepo.handleCommands()   // for processing API commands.
+	go objectsRepo.processChunks() // for streaming images back and forth.
+	go objectsRepo.processImages() // for processing stored images one by one.
 
 	service := &ImageService{
 		accessToken:      token,
-		repository:       repository,
+		data:             dataRepo,
+		objects:          objectsRepo,
 		uploadLinkPrefix: defaultUploadLinkPrefix,
 	}
 	service.registerRoutes()
