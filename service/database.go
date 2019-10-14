@@ -13,6 +13,8 @@ type PostgreSQLStore struct {
 	url string
 }
 
+// MARK: `DataStore` interface methods.
+
 func (s *PostgreSQLStore) initialize() error {
 	db, err := s.getConnection()
 	if err != nil {
@@ -133,6 +135,7 @@ func (s *PostgreSQLStore) getServiceStats() (*ServiceStats, error) {
 	return &stats, nil
 }
 
+// getConnection for this database.
 func (s *PostgreSQLStore) getConnection() (*gorm.DB, error) {
 	return gorm.Open("postgres", s.url)
 }

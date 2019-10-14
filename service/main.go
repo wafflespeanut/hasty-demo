@@ -52,9 +52,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	go repository.handleCommands()
-	go repository.processChunks()
-	go repository.processImages()
+	go repository.handleCommands() // for processing API commands.
+	go repository.processChunks()  // for streaming images back and forth.
+	go repository.processImages()  // for processing stored images one by one.
 
 	service := &ImageService{
 		accessToken:      token,

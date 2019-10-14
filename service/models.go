@@ -63,20 +63,20 @@ type ServiceStats struct {
 
 // PopularFormat represents the image format with the number of uploads.
 type PopularFormat struct {
-	Format  string
-	Uploads uint
+	Format  string `json:"format"`
+	Uploads uint   `json:"uploads"`
 }
 
 // CameraModel represents the camera model with the number of uploads.
 type CameraModel struct {
-	Model   string
-	Uploads uint
+	Model   string `json:"model"`
+	Uploads uint   `json:"uploads"`
 }
 
 // DayFrequency represents a day with the number of uploads.
 type DayFrequency struct {
-	Date    time.Time
-	Uploads uint
+	Date    time.Time `json:"date"`
+	Uploads uint      `json:"uploads"`
 }
 
 // applyDefaults for unknown metadata.

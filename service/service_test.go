@@ -73,16 +73,9 @@ func createService() *ImageService {
 			pathPrefix: "./",
 			openFds:    make(map[string]*os.File),
 		},
-		cmdHub: MessageHub{
-			cmdChan:  make(chan repoMessage),
-			respChan: make(chan interface{}),
-			ackChan:  make(chan struct{}),
-		},
-		streamHub: MessageHub{
-			cmdChan:  make(chan repoMessage),
-			respChan: make(chan interface{}),
-			ackChan:  make(chan struct{}),
-		},
+		cmdHub:    NewMessageHub(),
+		streamHub: NewMessageHub(),
+		imageHub:  NewMessageHub(),
 	}
 
 	// It's fine if all those goroutines keep blocking - they're efficient,

@@ -21,11 +21,11 @@ var (
 // we use the environment to decide which store we'll be using.
 //
 // Data storage:
-// - If `POSTGRES_URL` is set, then the store for PostgreSQL database is initialized (unimplemented).
+// - If `POSTGRES_URL` is set, then the store for PostgreSQL database is initialized.
 // - Otherwise, a no-op store is initialized.
 //
 // Object storage:
-// - If `S3_REGION` and `S3_BUCKET` is set, then AWS S3 store is initialized (unimplemented).
+// - If `S3_REGION` and `S3_BUCKET` is set, then AWS S3 store is initialized (**unimplemented**).
 // - Otherwise, file store is initialized (store path can be set in environment).
 func initializeRepository(linkCacheCap, metaCacheCap, hashesCap int) (*ImageRepository, error) {
 	linkCache, err := lru.New(linkCacheCap)
@@ -95,7 +95,8 @@ func initializeRepository(linkCacheCap, metaCacheCap, hashesCap int) (*ImageRepo
 }
 
 // FIXME: Repository should be split later for caching, processing and streaming.
-// i.e., each hub should be part of its own repository.
+// i.e., each hub should be part of its own repository and different services make
+// use of those repositories.
 
 // ImageRepository acts as the bridge between service handlers and the configured storage.
 // It has a queue for asynchronously streaming images back and forth and has an LRU cache
@@ -387,6 +388,7 @@ func (r *ImageRepository) processImages() {
 	}
 }
 
+// updateMetaFromExif of the image in the given metadata.
 func (r *ImageRepository) updateMetaFromExif(meta *ImageMeta) {
 	reader, err := r.objectStore.getImageReader(meta.ID)
 	if err != nil {
@@ -422,6 +424,7 @@ func (r *ImageRepository) updateMetaFromExif(meta *ImageMeta) {
 	}
 }
 
+// updateFormat of the image in the given metadata.
 func (r *ImageRepository) updateFormat(meta *ImageMeta) {
 	reader, err := r.objectStore.getImageReader(meta.ID)
 	if err != nil {

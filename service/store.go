@@ -11,22 +11,35 @@ import (
 
 // DataStore is the persistence layer for adding, mutating and querying data.
 type DataStore interface {
+	// initialize this store.
 	initialize() error
+	// addUploadID with the given expiry timestamp.
 	addUploadID(id string, expiry time.Time) error
+	// getUploadExpiry for the given upload ID.
 	getUploadExpiry(id string) (*time.Time, error)
+	// addImageMeta to this store.
 	addImageMeta(meta ImageMeta) error
+	// fetchImageMeta for the given image ID.
 	fetchImageMeta(id string) (*ImageMeta, error)
+	// fetchMetaForHash of some image.
 	fetchMetaForHash(hash string) (*ImageMeta, error)
+	// updateImageMeta existing for some image.
 	updateImageMeta(meta ImageMeta) error
+	// getServiceStats for the data we have collected so far.
 	getServiceStats() (*ServiceStats, error)
 }
 
 // ObjectStore is the persistence layer for storing and retrieving objects.
 type ObjectStore interface {
+	// storeChunk for the given image ID.
 	storeChunk(id string, chunk []byte, isFinal bool)
+	// retrieveChunks for the given image ID and send it through the given channel.
 	retrieveChunks(id string, stream chan<- Chunk)
+	// discardObject corresponding to the given image ID.
 	discardObject(id string)
+	// getImageReader corresponding to the given image ID.
 	getImageReader(id string) (io.Reader, error)
+	// cleanupImageReader for the given ID and reader obtained using `getImageReader`
 	cleanupImageReader(id string, reader io.Reader) error
 }
 
@@ -59,6 +72,8 @@ type FileStore struct {
 	pathPrefix string
 	openFds    map[string]*os.File
 }
+
+// MARK: `DataStore` interface methods.
 
 func (store *FileStore) storeChunk(id string, chunk []byte, isFinal bool) {
 	// FIXME: When we encounter disk errors, we should probably return
